@@ -1,0 +1,106 @@
+@startuml
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Consumption Service - Компоненты (C3)
+
+Container(consumption_service_container, "Consumption Service", "C# / ASP.NET Core", "Сбор, хранение и управление данными потребления электроэнергии")
+
+System_Boundary(consumption_boundary, "Consumption Service") {
+    
+    ' API Controller Layer
+    Component(api_controller, "Consumption API Controller", "ASP.NET Core Controller", "REST endpoints для получения/сохранения данных потребления")
+    Component(grpc_service, "Consumption gRPC Service", "gRPC", "gRPC endpoint для синхронного вызова из других сервисов")
+    
+    ' Business Logic Layer
+    Component(consumption_service_logic, "Consumption Service (Logic)", "C# Business Logic", "Основная бизнес-логика: валидация, нормализация, расчет базовых метрик")
+    Component(consumption_aggregator, "Consumption Aggregator", "C# Service", "Агрегирование данных по времени (часы, дни, месяцы), расчет средних значений и пиков")
+    Component(anomaly_detector, "Anomaly Detector", "C# Service + ML", "Обнаружение аномалий в потреблении (резкие скачки, отсутствие данных)")
+    Component(event_publisher, "Event Publisher", "C# Service", "Публикация событий (consumption.recorded, consumption.anomaly) в RabbitMQ")
+    
+    ' Data Access Layer
+    Component(consumption_repository, "Consumption Repository", "Entity Framework Core", "CRUD операции для данных потребления в TimescaleDB")
+    Component(device_repository, "Device Repository", "Entity Framework Core", "Получение информации об устройствах (счетчики, датчики)")
+    Component(cache_adapter, "Cache Adapter", "StackExchange.Redis", "Кеширование последних значений потребления для быстрого доступа")
+    
+    ' Integration Layer
+    Component(mqtt_listener, "MQTT Listener", "MQTTnet", "Прослушивание данных от IoT устройств через MQTT топики")
+    Component(api_adapter, "API Adapter", "HttpClient", "Получение данных от счетчиков через REST API если требуется")
+    Component(grpc_client, "gRPC Client", "gRPC Client", "Вызов Device Registry Service для валидации устройств")
+    
+    ' Message Consumer
+    Component(message_consumer, "Message Consumer", "RabbitMQ Consumer", "Получение сообщений из RabbitMQ (например, для интеграции)")
+    
+    ' Background Tasks
+    Component(background_tasks, "Background Tasks", "BackgroundService", "Фоновые задачи: агрегирование, очистка старых данных, переиндексирование")
+    
+    ' Cross-Cutting Concerns
+    Component(logger, "Logger", "Serilog", "Логирование всех операций, ошибок, перфоманс метрик")
+    Component(metrics_exporter, "Metrics Exporter", "Prometheus Client", "Экспорт метрик для мониторинга: количество записей, время обработки")
+    Component(error_handler, "Error Handler", "Exception Filter", "Централизованная обработка ошибок, логирование, трассировка ошибок")
+}
+
+' Внешние системы
+ContainerDb(timeseries_db, "TimescaleDB", "PostgreSQL + TimescaleDB", "Хранилище временных рядов потребления")
+ContainerDb(redis_cache, "Redis", "Redis", "Кеш последних значений")
+Container(rabbitmq, "RabbitMQ", "RabbitMQ", "Брокер сообщений")
+Container(smart_meters, "IoT Счетчики", "MQTT / API", "Умные счетчики и датчики")
+Container(device_registry, "Device Registry Service", "gRPC", "Сервис реестра устройств")
+Container(api_gateway, "API Gateway", "REST", "Внешний API Gateway")
+
+' ========== СВЯЗИ ВНУТРИ КОМПОНЕНТОВ ==========
+
+' API -> Business Logic
+Rel(api_controller, consumption_service_logic, "Валидирует входные данные", "C# calls")
+Rel(grpc_service, consumption_service_logic, "Запросы данных потребления", "C# calls")
+
+' Business Logic -> Data Layer
+Rel(consumption_service_logic, consumption_repository, "Сохраняет новые записи", "C# calls (EF Core)")
+Rel(consumption_service_logic, anomaly_detector, "Проверка на аномалии", "C# calls")
+Rel(consumption_service_logic, cache_adapter, "Кешировать последнее значение", "C# calls")
+
+' Aggregator
+Rel(consumption_aggregator, consumption_repository, "Read временные ряды", "C# calls (EF Core)")
+Rel(consumption_aggregator, cache_adapter, "Кешировать агрегированные данные", "C# calls")
+
+' Anomaly Detection
+Rel(anomaly_detector, consumption_repository, "Read исторические данные", "C# calls (EF Core)")
+Rel(anomaly_detector, event_publisher, "Publish anomaly events", "C# calls")
+
+' Event Publishing
+Rel(event_publisher, rabbitmq, "Publish events", "AMQP (RabbitMQ)")
+
+' Background Tasks
+Rel(background_tasks, consumption_aggregator, "Trigger агрегирование", "C# calls")
+Rel(background_tasks, consumption_repository, "Cleanup старых данных", "C# calls (EF Core)")
+
+' Cross-Cutting
+Rel(consumption_service_logic, logger, "Log операции", "C# calls")
+Rel(consumption_service_logic, metrics_exporter, "Export метрики", "C# calls")
+Rel(consumption_service_logic, error_handler, "Handle ошибки", "C# calls")
+
+' ========== СВЯЗИ С ВНЕШНИМИ СИСТЕМАМИ ==========
+
+' Входящие данные
+Rel(smart_meters, mqtt_listener, "MQTT сообщения потребления", "MQTT (publish)")
+Rel(mqtt_listener, consumption_service_logic, "Parse и передать данные", "C# calls")
+Rel(api_gateway, api_controller, "REST запросы", "HTTPS/REST")
+
+' Валидация устройств
+Rel(consumption_service_logic, grpc_client, "Валидировать устройство", "gRPC calls")
+Rel(grpc_client, device_registry, "Get device info", "gRPC")
+
+' Хранилище данных
+Rel(consumption_repository, timeseries_db, "Read/Write потребление", "SQL (PostgreSQL)")
+Rel(cache_adapter, redis_cache, "Get/Set последние значения", "Redis Protocol")
+
+' Message Consumer из RabbitMQ (если нужны входящие события)
+Rel(message_consumer, rabbitmq, "Subscribe: integration.* events", "AMQP (RabbitMQ)")
+Rel(message_consumer, consumption_service_logic, "Process сообщения", "C# calls")
+
+' Мониторинг
+Rel(metrics_exporter, rabbitmq, "Отправляет метрики", "AMQP (опционально)")
+
+' Логирование
+Rel(logger, rabbitmq, "Отправляет логи (если centralized logging)", "AMQP (опционально)")
+@enduml

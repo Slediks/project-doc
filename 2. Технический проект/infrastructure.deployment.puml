@@ -1,0 +1,111 @@
+@startuml C4 Infrastructure Diagram - Система учета энергопотребления
+left to right direction
+!define C4P https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master
+!includeurl C4P/C4_Container.puml
+
+title C4 Infrastructure Diagram - Система учета энергопотребления
+
+package "Облачная инфраструктура Yandex Cloud" as cloud {
+    Container(nginx, "Nginx", "Nginx", "Обратный прокси и балансировщик нагрузки")
+    Container(envoy_gateway, "API Gateway", "Envoy", "Маршрутизация API, rate limiting, auth")
+
+    package "Kubernetes Cluster" as k8s_cluster {
+        package "Auth Pod" as auth_pod {
+            Container(auth_service, "Auth Service", "C# (.NET)", "OAuth2/OIDC, управление сессиями, роли пользователей")
+        }
+
+        package "Device Pod" as device_pod {
+            Container(device_service, "Device Service", "C# (.NET)", "Управление счетчиками и датчиками энергии")
+        }
+
+        package "Consumption Pod" as consumption_pod {
+            Container(consumption_service, "Consumption Service", "C# (.NET)", "Прием и хранение данных потребления")
+        }
+
+        package "Analytics Pod" as analytics_pod {
+            Container(analytics_service, "Analytics Service", "C# (.NET)", "Расчет показателей, тренды, сравнение")
+        }
+
+        package "Recommendation Pod" as recommendation_pod {
+            Container(recommendation_service, "Recommendation Service", "C# (.NET)", "Расчет рекомендаций по снижению потребления")
+        }
+
+        package "Notification Pod" as notification_pod {
+            Container(notification_service, "Notification Service", "C# (.NET)", "Отправка Email/SMS/push уведомлений")
+        }
+
+        package "Report Pod" as report_pod {
+            Container(report_service, "Report Service", "C# (.NET)", "Генерация отчетов и экспорта данных")
+        }
+
+        package "Background Worker Pod" as worker_pod {
+            Container(background_worker, "Background Worker", ".NET Worker", "Асинхронная обработка задач, интеграции")
+        }
+    }
+
+    Container(rabbitmq, "Шина событий", "RabbitMQ", "Обмен сообщениями между сервисами")
+    Container(redis_cluster, "Redis Cluster", "Redis", "Кэширование, сессии, rate limiting")
+}
+
+package "Database Cluster" as database {
+    Container(postgres_master, "PostgreSQL Master", "PostgreSQL", "Основная база данных (запись)")
+    Container(postgres_replica, "PostgreSQL Replica", "PostgreSQL", "Реплика базы данных для чтения")
+    Container(timescaledb, "TimescaleDB", "PostgreSQL", "Хранение временных рядов потребления")
+    Container(clickhouse, "ClickHouse", "ClickHouse", "Аналитика и быстрые агрегации")
+}
+
+package "Object Storage" as storage {
+    Container(yandex_storage, "Yandex Object Storage", "S3 Compatible", "Хранение отчетов, графиков и логов")
+}
+
+System_Ext(sms_email, "Провайдер SMS/Email", "API")
+System_Ext(iot_devices, "IoT счетчики и датчики", "MQTT/HTTP")
+System_Ext(external_utility, "Внешняя система коммунальной компании", "API/HTTPS")
+System_Ext(backup_system, "Система резервного копирования", "API/HTTPS")
+
+' Связи с основной БД
+Rel(k8s_cluster, postgres_master, "Чтение/запись", "Entity Framework Core / Npgsql")
+Rel(device_service, postgres_replica, "Read-only", "Entity Framework Core")
+Rel(consumption_service, timescaledb, "Запись временных рядов", "TimescaleDB Driver")
+Rel(analytics_service, postgres_replica, "Read-only", "Entity Framework Core")
+Rel(analytics_service, clickhouse, "Запрос аналитики", "ClickHouse Driver")
+Rel(recommendation_service, clickhouse, "Анализ данных", "ClickHouse Driver")
+Rel(postgres_master, postgres_replica, "Репликация данных", "Streaming Replication")
+
+' Связи с кешем
+Rel(k8s_cluster, redis_cluster, "Кэширование данных", "StackExchange.Redis")
+Rel(envoy_gateway, redis_cluster, "Rate limit / sessions", "Redis protocol")
+Rel(auth_service, redis_cluster, "Session storage", "Redis protocol")
+Rel(analytics_service, redis_cluster, "Кэш вычисленных показателей", "Redis protocol")
+
+' Связи с объектным хранилищем
+Rel(report_service, yandex_storage, "Сохранение отчетов", "S3 API")
+Rel(background_worker, yandex_storage, "Архивирование логов", "S3 API")
+
+' IoT устройства
+Rel(iot_devices, consumption_service, "Отправка показаний", "MQTT/HTTP")
+
+' Внешние системы
+Rel(notification_service, sms_email, "Отправка уведомлений", "REST API")
+Rel(background_worker, external_utility, "Импорт/экспорт данных тарифов", "REST API")
+Rel(background_worker, backup_system, "Резервное копирование", "REST API")
+
+' RabbitMQ — события
+Rel(consumption_service, rabbitmq, "Публикация событий потребления", "AMQP")
+Rel(analytics_service, rabbitmq, "Публикация событий анализа", "AMQP")
+Rel(recommendation_service, rabbitmq, "Публикация рекомендаций", "AMQP")
+Rel(background_worker, rabbitmq, "Потребление событий", "AMQP")
+Rel(notification_service, rabbitmq, "Чтение событий уведомлений", "AMQP")
+
+' Взаимодействия между сервисами
+Rel(consumption_service, device_service, "Валидация датчиков", "gRPC")
+Rel(analytics_service, consumption_service, "Получение данных потребления", "gRPC")
+Rel(recommendation_service, analytics_service, "Получение показателей", "gRPC")
+Rel(notification_service, consumption_service, "Получение контактов пользователя", "gRPC")
+Rel(background_worker, report_service, "Генерация отчетов", "gRPC")
+
+' Балансировка нагрузки
+Rel(nginx, envoy_gateway, "Проксирование запросов", "HTTPS")
+Rel(envoy_gateway, k8s_cluster, "Маршрутизация к сервисам", "gRPC/HTTP")
+
+@enduml

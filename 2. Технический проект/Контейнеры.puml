@@ -1,0 +1,117 @@
+@startuml Система учета энергопотребления - Диаграмма контейнеров
+!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Система учета энергопотребления - Контейнеры (C2)
+
+' Пользователи
+Person(homeowner, "Домовладелец", "")
+Person(industrial_admin, "Администратор промобъекта", "")
+Person(power_company, "Электрокомпания", "")
+Person(tech_staff, "Технический персонал", "")
+
+System_Boundary(c1, "Система учета энергопотребления") {
+    ' Фронтенд контейнеры
+    Container(web_app, "Веб-приложение", "React + TypeScript", "Веб-интерфейс для домовладельцев, администраторов, электрокомпаний, техперсонала")
+    Container(mobile_app, "Мобильное приложение", "React Native", "Мобильный клиент для домовладельцев и администраторов промобъектов")
+    
+    ' API Gateway
+    Container(api_gateway, "API Gateway", "ASP.NET Core / Envoy", "Единая точка входа для всех клиентов. Аутентификация, маршрутизация, rate limiting, TLS")
+    
+    ' Микросервисы (бэкенд)
+    Container(auth_service, "Auth Service", "C# / ASP.NET Core", "OAuth2/OIDC, JWT токены, управление сессиями, RBAC (роли)")
+    Container(consumption_service, "Consumption Service", "C# / ASP.NET Core", "Сбор, хранение и управление данными потребления. Основной сервис для работы с временными рядами")
+    Container(analytics_service, "Analytics Service", "C# / ASP.NET Core + Python", "Анализ паттернов потребления, расчет пиков, энергоемкости. Обработка исторических данных")
+    Container(recommendation_service, "Recommendation Service", "C# / ASP.NET Core + ML", "Генерирует персонализированные рекомендации по экономии на основе анализа потребления")
+    Container(forecast_service, "Forecast Service", "Python + scikit-learn/TensorFlow", "Прогнозирование будущего потребления для электрокомпаний. ML модели")
+    Container(device_registry_service, "Device Registry Service", "C# / ASP.NET Core", "Реестр счетчиков и датчиков, управление метаданными, история обслуживания")
+    Container(alert_service, "Alert Service", "C# / ASP.NET Core", "Генерирует оповещения при превышениях, технических проблемах, аномалиях")
+    Container(report_service, "Report Service", "C# / ASP.NET Core", "Генерирует отчеты в PDF, CSV, Excel. Экспорт данных для пользователей")
+    Container(notification_service, "Notification Service", "C# / ASP.NET Core", "Отправка Email, SMS, Push-уведомлений. Работает асинхронно через очереди")
+    Container(integration_service, "Integration Service", "C# / ASP.NET Core", "Интеграция с внешними системами: МЭС, MES, резервное копирование")
+    
+    ' Data & Storage
+    ContainerDb(timeseries_db, "TimescaleDB", "PostgreSQL + TimescaleDB", "Хранилище временных рядов потребления. Оптимизировано для больших объемов данных со временными метками")
+    ContainerDb(analytics_db, "ClickHouse", "ClickHouse OLAP", "Хранилище для аналитики. Быстрые запросы на больших датасетах")
+    ContainerDb(main_db, "PostgreSQL", "PostgreSQL", "Основная БД: пользователи, устройства, конфигурации, метаданные")
+    ContainerDb(redis_cache, "Redis", "Redis", "Кеширование данных, сессии, очереди фоновых задач")
+    
+    ' Message Broker
+    ContainerDb(rabbitmq, "RabbitMQ", "RabbitMQ (AMQP)", "Асинхронное взаимодействие между сервисами. Publish/Subscribe для событий")
+    
+    ' File Storage
+    ContainerDb(object_storage, "Yandex Object Storage", "S3-compatible", "Хранилище файлов: отчеты, графики, экспорты, логи")
+    
+    ' Background Processing
+    Container(background_worker, "Background Worker", ".NET Worker Service", "Асинхронная обработка задач: расчеты, интеграции, очистка данных")
+}
+
+' Внешние системы
+System_Ext(smart_meters, "IoT Счетчики и датчики", "MQTT / REST API", "")
+System_Ext(power_utility, "Система электрокомпании", "REST API", "")
+System_Ext(email_sms, "Email/SMS/Push провайдер", "REST API", "")
+System_Ext(mes_system, "Система MES", "REST API", "")
+System_Ext(backup_service, "Облако (резервные копии)", "REST API", "")
+
+' Связи: Пользователи -> Приложения
+Rel(homeowner, web_app, "Использует", "HTTPS")
+Rel(homeowner, mobile_app, "Использует", "HTTPS")
+Rel(industrial_admin, web_app, "Использует", "HTTPS")
+Rel(industrial_admin, mobile_app, "Использует", "HTTPS")
+Rel(power_company, web_app, "Использует (специальный интерфейс)", "HTTPS")
+Rel(tech_staff, web_app, "Использует (управление устройствами)", "HTTPS")
+
+' Связи: Клиенты -> API Gateway
+Rel(web_app, api_gateway, "REST/JSON запросы", "HTTPS")
+Rel(mobile_app, api_gateway, "REST/JSON запросы (PKCE)", "HTTPS")
+
+' Связи: API Gateway -> Микросервисы
+Rel(api_gateway, auth_service, "Аутентификация, валидация токенов", "gRPC/HTTP")
+Rel(api_gateway, consumption_service, "Запросы данных потребления", "gRPC/HTTP")
+Rel(api_gateway, analytics_service, "Аналитика и отчеты", "gRPC/HTTP")
+Rel(api_gateway, recommendation_service, "Рекомендации", "gRPC/HTTP")
+Rel(api_gateway, forecast_service, "Прогнозы", "gRPC/HTTP")
+Rel(api_gateway, device_registry_service, "Управление устройствами", "gRPC/HTTP")
+Rel(api_gateway, alert_service, "Просмотр оповещений", "gRPC/HTTP")
+Rel(api_gateway, report_service, "Генерирование отчетов", "gRPC/HTTP")
+
+' Связи: Сервисы к БД
+Rel(consumption_service, timeseries_db, "Read/Write временные ряды потребления", "SQL")
+Rel(analytics_service, analytics_db, "Read OLAP запросы", "SQL")
+Rel(forecast_service, analytics_db, "Read исторические данные", "SQL")
+Rel(device_registry_service, main_db, "Read/Write устройства, обслуживание", "SQL")
+Rel(auth_service, main_db, "Read/Write пользователи, сессии", "SQL")
+Rel(alert_service, main_db, "Read/Write оповещения, лимиты", "SQL")
+Rel(report_service, timeseries_db, "Read данные для отчетов", "SQL")
+Rel(report_service, main_db, "Read конфигурации", "SQL")
+
+' Кеширование
+Rel(api_gateway, redis_cache, "Rate limiting, сессии", "Redis")
+Rel(consumption_service, redis_cache, "Кеширование последних значений", "Redis")
+Rel(analytics_service, redis_cache, "Кеширование результатов", "Redis")
+
+' Асинхронное взаимодействие через RabbitMQ
+Rel(consumption_service, rabbitmq, "Publish: consumption.recorded, consumption.anomaly", "AMQP")
+Rel(analytics_service, rabbitmq, "Subscribe: consumption.* события", "AMQP")
+Rel(recommendation_service, rabbitmq, "Subscribe: consumption.* события", "AMQP")
+Rel(forecast_service, rabbitmq, "Subscribe: consumption.* события", "AMQP")
+Rel(alert_service, rabbitmq, "Subscribe: consumption.*, anomaly", "AMQP")
+Rel(background_worker, rabbitmq, "Subscribe: scheduled.*, integration.*", "AMQP")
+Rel(background_worker, notification_service, "Trigger: отправка уведомлений", "gRPC")
+Rel(alert_service, notification_service, "Publish события для уведомлений", "RabbitMQ -> Queue")
+
+' Хранение файлов
+Rel(report_service, object_storage, "Upload отчеты (PDF, CSV, Excel)", "S3 API")
+
+' Внешние интеграции
+Rel(consumption_service, smart_meters, "Получает данные потребления", "MQTT / REST API")
+Rel(integration_service, power_utility, "Отправляет агрегированные данные, получает тарифы", "REST API")
+Rel(integration_service, mes_system, "Синхронизация данных производства", "REST API")
+Rel(background_worker, backup_service, "Отправляет резервные копии", "REST API")
+
+' Background Worker обрабатывает фоновые задачи
+Rel(background_worker, consumption_service, "Агрегирование, нормализация данных", "gRPC")
+Rel(background_worker, analytics_service, "Запуск расчетов анализа", "gRPC")
+Rel(background_worker, forecast_service, "Переобучение ML моделей", "gRPC")
+Rel(background_worker, integration_service, "Синхронизация с внешними системами", "gRPC")
+
+@enduml
